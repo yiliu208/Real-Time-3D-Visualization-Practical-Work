@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exercise 1 Setting up the Kitchen Environment</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls;
+    
+        // Exercise 1: Setting up the Kitchen Environment
+        function Exercise1_Kitchen() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(3, 3, 5);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); 
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true; 
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.setClearColor(0x000000, 0); 
+            document.body.appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.maxPolarAngle = Math.PI / 2;
+            controls.target.set(0, 1, 0);
+
+            const textureLoader = new THREE.TextureLoader();
+            const floorTexture = textureLoader.load('wood.jpg');
+            floorTexture.wrapS = THREE.RepeatWrapping;
+            floorTexture.wrapT = THREE.RepeatWrapping;
+            floorTexture.repeat.set(4, 4); 
+
+            const floorMaterial = new THREE.MeshStandardMaterial({ 
+                map: floorTexture, 
+                roughness: 0.8, 
+                side: THREE.DoubleSide
+            }); 
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), floorMaterial);
+            floor.rotation.x = -Math.PI / 2; 
+            floor.receiveShadow = true; 
+            scene.add(floor);
+
+            const wallTexture = textureLoader.load('wallpaper.jpg');
+            wallTexture.colorSpace = THREE.SRGBColorSpace; 
+            wallTexture.wrapS = THREE.RepeatWrapping;
+            wallTexture.wrapT = THREE.RepeatWrapping;
+            wallTexture.repeat.set(4, 2); 
+
+            const wallMaterial = new THREE.MeshStandardMaterial({ 
+                map: wallTexture,      
+                roughness: 0.9,        
+                side: THREE.DoubleSide
+            });
+
+            const backWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMaterial); 
+            backWall.position.set(0, 2.5, -5);
+            backWall.receiveShadow = true;
+            backWall.name = "wall"; 
+            scene.add(backWall);
+
+            const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMaterial); 
+            leftWall.position.set(-5, 2.5, 0);
+            leftWall.rotation.y = Math.PI / 2;
+            leftWall.receiveShadow = true;
+            leftWall.name = "wall"; 
+            scene.add(leftWall);
+
+            const steelTexture = textureLoader.load('stainless steel.jpg');
+            const counterMaterial = new THREE.MeshStandardMaterial({ 
+                map: steelTexture
+            }); 
+            const counter = new THREE.Mesh(new THREE.BoxGeometry(4, 1, 2), counterMaterial); 
+            counter.position.set(0, 0.5, 0); 
+            counter.castShadow = true;
+            counter.receiveShadow = true;
+            scene.add(counter);
+
+            const cupMat = new THREE.MeshStandardMaterial({ color: 0xE74C3C, roughness: 0.2, metalness: 0.1 }); 
+            const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.4, 32), cupMat);
+            cup.position.set(-0.8, 1.2, 0);
+            cup.castShadow = true;
+            scene.add(cup);
+
+            const plateMat = new THREE.MeshStandardMaterial({ color: 0xFFF59D, roughness: 0.1 }); 
+            const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.05, 32), plateMat);
+            plate.position.set(0.5, 1.025, -0.4);
+            plate.castShadow = true;
+            scene.add(plate);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1); 
+            scene.add(ambientLight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        Exercise1_Kitchen(); 
+        animate();
+    </script>
+</body>
+</html>

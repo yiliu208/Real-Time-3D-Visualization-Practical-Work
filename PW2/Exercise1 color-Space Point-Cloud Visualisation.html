@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Exercise1 color-Space Point-Cloud Visualisation</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; color: #fff; font-family: sans-serif; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 8px; border: 1px solid #555; width: 280px;}
+        #upload-btn { background: #4CAF50; color: white; padding: 10px; text-align: center; cursor: pointer; border-radius: 4px; margin-bottom: 15px; font-weight: bold;}
+        #file-input { display: none; }
+        #media-info { font-size: 12px; color: #aaa; margin-bottom: 10px; word-break: break-all;}
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div id="upload-btn" onclick="document.getElementById('file-input').click()">📁 Load Image or Video</div>
+        <input type="file" id="file-input" accept="image/*,video/*">
+        <div id="media-info">No media loaded.</div>
+    </div>
+
+    <div id="container"></div>
+
+    <script type="x-shader/x-vertex" id="vertexshader">
+        uniform sampler2D u_image;
+        uniform int u_colorSpace;
+        uniform int u_projMode;
+        
+        varying vec3 vColor;
+        const mat3 LIN_TO_XYZ = mat3(
+            0.4124564, 0.2126729, 0.0193339,
+            0.3575761, 0.7151522, 0.1191920,
+            0.1804375, 0.0721750, 0.9503041
+        );
+
+        const vec3 D65 = vec3(0.95047, 1.0000, 1.08883);
+        vec3 sRGBtoLinear(vec3 c) {
+            vec3 b1 = c / 12.92;
+            vec3 b2 = pow((c + 0.055) / 1.055, vec3(2.4));
+            return mix(b1, b2, step(0.04045, c));
+        }
+
+        float f_lab(float t) {
+            float delta = 6.0 / 29.0;
+            if (t > delta * delta * delta) {
+                return pow(t, 1.0 / 3.0);
+            } else {
+                return t / (3.0 * delta * delta) + 4.0 / 29.0;
+            }
+        }
+
+        vec3 RGBtoHSV(vec3 c) {
+            float cmax = max(c.r, max(c.g, c.b));
+            float cmin = min(c.r, min(c.g, c.b));
+            float delta = cmax - cmin;
+            float H = 0.0;
+            if (delta == 0.0) H = 0.0;
+            else if (cmax == c.r) H = mod((c.g - c.b) / delta, 6.0);
+            else if (cmax == c.g) H = (c.b - c.r) / delta + 2.0;
+            else H = (c.r - c.g) / delta + 4.0;
+            H *= 60.0;
+            float S = (cmax == 0.0) ? 0.0 : delta / cmax;
+            return vec3(H / 360.0, S, cmax);
+        }
+
+        void main() {
+            vec4 texColor = texture2D(u_image, uv);
+            vec3 sRGB = texColor.rgb;
+            vColor = sRGB;
+
+            vec3 targetPos = vec3(0.0);
+
+            if (u_colorSpace == 0) {
+                targetPos = sRGB - vec3(0.5);
+            } else if (u_colorSpace == 1) {
+                targetPos = RGBtoHSV(sRGB) - vec3(0.5);
+            } else {
+                vec3 linearRGB = sRGBtoLinear(sRGB);
+                vec3 XYZ = LIN_TO_XYZ * linearRGB; 
+
+                if (u_colorSpace == 2) {
+                    targetPos = XYZ - vec3(0.5);
+                } else if (u_colorSpace == 3) {
+                    float sum = XYZ.x + XYZ.y + XYZ.z;
+                    float x = (sum == 0.0) ? 0.0 : XYZ.x / sum;
+                    float y = (sum == 0.0) ? 0.0 : XYZ.y / sum;
+                    targetPos = vec3(x, XYZ.y, y) - vec3(0.3127, 0.5, 0.329);
+                } else {
+                    float fx = f_lab(XYZ.x / D65.x);
+                    float fy = f_lab(XYZ.y / D65.y);
+                    float fz = f_lab(XYZ.z / D65.z);
+                    float L = 116.0 * fy - 16.0; 
+                    float a = 500.0 * (fx - fy); 
+                    float b = 200.0 * (fy - fz); 
+
+                    if (u_colorSpace == 4) { 
+                        targetPos = vec3(a / 128.0, (L / 100.0) - 0.5, b / 128.0);
+                    } else if (u_colorSpace == 5) { 
+                        float C = sqrt(a*a + b*b);
+                        float h = atan(b, a);
+                        targetPos = vec3((C / 128.0) * cos(h), (L / 100.0) - 0.5, (C / 128.0) * sin(h));
+                    }
+                }
+            }
+
+            if (u_projMode == 1) targetPos.y = -0.5; 
+            if (u_projMode == 2) targetPos.z = -0.5; 
+            if (u_projMode == 3) targetPos.x = -0.5; 
+
+            float scale = 10.0;
+            vec4 mvPosition = modelViewMatrix * vec4(targetPos * scale, 1.0);
+            
+            float pSize = (u_projMode == 0) ? 80.0 : 40.0;
+            gl_PointSize = pSize / (-mvPosition.z);
+            gl_Position = projectionMatrix * mvPosition;
+        }
+    </script>
+
+    <script type="x-shader/x-fragment" id="fragmentshader">
+        uniform int u_projMode;
+        uniform int u_isDensity;
+        varying vec3 vColor;
+
+        void main() {
+            float l = length(gl_PointCoord - vec2(0.5));
+            if (l > 0.475) discard;
+            if (u_projMode > 0) {
+                gl_FragColor = vec4(0.0, 0.0, 0.0, 0.05);
+            } else {
+                if (u_isDensity == 1) {
+                    gl_FragColor = vec4(vColor, 0.4 - l);
+                } else {
+                    gl_FragColor = vec4(vColor, 0.8);
+                }
+            }
+        }
+    </script>
+
+    <script async src="https://unpkg.com/es-module-shims@1.3.6/dist/es-module-shims.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.150.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.150.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+        let camera, scene, renderer, controls;
+        let materials = []; 
+        let mediaTexture = null;
+        let referencePlane = null;
+        let videoElement = document.createElement('video');
+        const scaleMultiplier = 10.0;
+
+        function init() {
+            const container = document.getElementById('container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x222222);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(12, 8, 20);
+
+            setupEnvironment();
+
+            const resolution = 256; 
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(resolution * resolution * 3);
+            const uvs = new Float32Array(resolution * resolution * 2);
+            for (let i = 0; i < resolution; i++) {
+                for (let j = 0; j < resolution; j++) {
+                    const idx = i * resolution + j;
+                    uvs[idx * 2] = i / resolution;
+                    uvs[idx * 2 + 1] = j / resolution;
+                }
+            }
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+
+            createPointLayer(geometry, 0, true);  
+            createPointLayer(geometry, 1, false); 
+            createPointLayer(geometry, 2, false); 
+            createPointLayer(geometry, 3, false); 
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            container.appendChild(renderer.domElement);
+            document.body.appendChild(VRButton.createButton(renderer)); 
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            setupGUI();
+            document.getElementById('file-input').addEventListener('change', handleFileUpload);
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createPointLayer(geometry, projMode, isMain) {
+            const mat = new THREE.ShaderMaterial({
+                uniforms: { 
+                    u_image: { value: mediaTexture },
+                    u_colorSpace: { value: 0 },
+                    u_projMode: { value: projMode },
+                    u_isDensity: { value: 0 }
+                },
+                vertexShader: document.getElementById('vertexshader').textContent,
+                fragmentShader: document.getElementById('fragmentshader').textContent,
+                transparent: true,
+                depthWrite: false, 
+                blending: isMain ? THREE.NormalBlending : THREE.NormalBlending,
+                depthTest: true,
+                depthWrite: isMain,
+            });
+            mat.userData = { isMain: isMain }; 
+            materials.push(mat);
+            
+            const points = new THREE.Points(geometry, mat);
+            scene.add(points);
+        }
+
+        function setupEnvironment() {
+            const axesHelper = new THREE.AxesHelper(1.2 * scaleMultiplier);
+            axesHelper.position.set(-0.5 * scaleMultiplier, -0.5 * scaleMultiplier, -0.5 * scaleMultiplier);
+            scene.add(axesHelper);
+
+            const createWall = (rotX, rotY, rotZ, px, py, pz) => {
+                const grid = new THREE.GridHelper(1 * scaleMultiplier, 10, 0x444444, 0x444444);
+                grid.rotation.set(rotX, rotY, rotZ);
+                grid.position.set(px, py, pz);
+                scene.add(grid);
+            };
+
+            createWall(0, 0, 0, 0, -0.5 * scaleMultiplier, 0); 
+            createWall(Math.PI/2, 0, 0, 0, 0, -0.5 * scaleMultiplier); 
+            createWall(0, 0, Math.PI/2, -0.5 * scaleMultiplier, 0, 0); 
+
+            const planeGeom = new THREE.PlaneGeometry(1 * scaleMultiplier, 1 * scaleMultiplier);
+            const planeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+            referencePlane = new THREE.Mesh(planeGeom, planeMat);
+            referencePlane.rotation.x = -Math.PI / 2;
+            referencePlane.position.y = -0.75 * scaleMultiplier; 
+            referencePlane.visible = false;
+            scene.add(referencePlane);
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+    
+            const url = URL.createObjectURL(file);
+            document.getElementById('media-info').innerText = `Loaded: ${file.name}`;
+
+            if (file.type.startsWith('video/')) {
+                videoElement.src = url;
+                videoElement.onloadeddata = () => {
+                    const tex = new THREE.VideoTexture(videoElement);
+                    tex.minFilter = THREE.LinearFilter;
+                    updateMaterialsTexture(tex);
+                    const aspect = videoElement.videoHeight / videoElement.videoWidth;
+                    referencePlane.scale.set(1, aspect, 1);
+                    videoElement.play();
+                };
+            }
+                else if (file.type.startsWith('image/')) {
+                    videoElement.pause();
+                    const loader = new THREE.TextureLoader();
+                    loader.load(url, (tex) => {
+                        tex.needsUpdate = true;
+                        updateMaterialsTexture(tex);
+
+                        const aspect = tex.image.height / tex.image.width;
+                        referencePlane.scale.set(1, aspect, 1);
+                        URL.revokeObjectURL(url);
+                    });
+                }
+            }
+
+        function updateMaterialsTexture(tex) {
+            mediaTexture = tex;
+            materials.forEach(m => {
+            m.uniforms.u_image.value = tex;
+            });
+
+            scene.traverse(child => {
+                if (child instanceof THREE.Points || child instanceof THREE.Mesh) {
+                    child.visible = true; 
+                }
+            });
+
+            if (referencePlane) {
+                referencePlane.material.map = tex;
+                referencePlane.material.needsUpdate = true;
+            }
+        }
+
+        function setupGUI() {
+            const guiParams = {
+                colorSpace: 0,
+                visMode: 'Point-Cloud',
+                pausePlay: function () {
+                    if (videoElement.src) {
+                        if (!videoElement.paused) {
+                            console.log("pause");
+                            videoElement.pause();
+                        } else {
+                            console.log("play");
+                            videoElement.play();
+                        }
+                    }
+                },
+
+                add10sec: function () {
+                    if (videoElement.src) {
+                        videoElement.currentTime = videoElement.currentTime + 10;
+                        console.log("Current Time: " + videoElement.currentTime);
+                    }
+                }
+            };
+
+            const gui = new GUI({ container: document.getElementById('ui'), width: 250 });
+            gui.add(guiParams, 'colorSpace', { 
+                'sRGB': 0, 'HSV': 1, 'CIE XYZ': 2, 'CIE xyY': 3, 'CIE LAB': 4, 'CIE LCH': 5 
+            }).name('Color Space').onChange(val => {
+                materials.forEach(m => m.uniforms.u_colorSpace.value = parseInt(val));
+            });
+
+            gui.add(guiParams, 'visMode', ['Point-Cloud', 'Density']).onChange(val => {
+                const isDensity = (val === 'Density');
+                materials.forEach(m => {
+                    
+                    if (m.userData.isMain) {
+                        m.uniforms.u_isDensity.value = isDensity ? 1 : 0;
+                        m.blending = isDensity ? THREE.AdditiveBlending : THREE.NormalBlending;
+                        m.depthTest = !isDensity; 
+                        m.needsUpdate = true;
+                    }
+                });
+            });
+
+            const videoFolder = gui.addFolder('Video Controls');
+            videoFolder.add(guiParams, 'pausePlay').name('⏯ Pause/Play Video');
+            videoFolder.add(guiParams, 'add10sec').name('⏩ Add 10 Seconds');
+            videoFolder.open(); 
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            renderer.setAnimationLoop(() => {
+                controls.update(); 
+                renderer.render(scene, camera);
+            });
+        }
+
+        init();
+        animate();
+    </script>
+</body>
+</html>
